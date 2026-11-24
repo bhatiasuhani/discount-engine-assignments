@@ -9,13 +9,17 @@ import { useState } from 'react'
 import CsvUploader from './components/CsvUploader.jsx'
 import DataTable from './components/DataTable.jsx'
 import ErrorBanner from './components/ErrorBanner.jsx'
+import NlRuleInput from './components/NlRuleInput.jsx'
 import { parseRulesCSV, parseCartCSV } from './engine/csvParser.js'
 import { processCart, applyCartOffer } from './engine/discountEngine.js'
 
 // ── Column definitions ───────────────────────────────────────────
 
 const RULES_COLUMNS = [
-  { key: 'ruleId',    label: 'Rule ID' },
+  { key: 'ruleId',    label: 'Rule ID',
+    render: (v, row) => row.source === 'natural-language'
+      ? <span>{v} <span style={{ fontSize: 9, fontWeight: 700, color: '#FF5800' }}>NEW</span></span>
+      : v },
   { key: 'scope',     label: 'Scope',      render: (v) => v.charAt(0).toUpperCase() + v.slice(1) },
   { key: 'appliesTo', label: 'Applies To' },
   { key: 'type',      label: 'Type',       render: (v) => v.charAt(0).toUpperCase() + v.slice(1) },
@@ -135,10 +139,22 @@ export default function App() {
     setResults(null)
   }
 
-  function handleCalculate() {
-    const res = processCart(cartItems, rules)
+  // Runs the engine. Every input path (CSV, natural language, ...) ends up here.
+  function runEngine(currentCart, currentRules) {
+    const res = processCart(currentCart, currentRules)
     setResults(res)
-    setSummary(applyCartOffer(res, rules))
+    setSummary(applyCartOffer(res, currentRules))
+  }
+
+  function handleCalculate() {
+    runEngine(cartItems, rules)
+  }
+
+  // Natural-language rule confirmed by the user: add it and re-run on the current cart.
+  function handleNlRuleConfirmed(rule) {
+    const updated = [...rules, rule]
+    setRules(updated)
+    if (cartItems.length > 0) runEngine(cartItems, updated)
   }
 
   const canCalculate = rules.length > 0 && cartItems.length > 0
@@ -198,6 +214,12 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Natural-language rule input */}
+        <div style={S.section}>
+          <div style={S.sectionTitle}>Add a Rule in Plain English</div>
+          <NlRuleInput rules={rules} cartItems={cartItems} onConfirm={handleNlRuleConfirmed} />
         </div>
 
         {/* Calculate button */}
