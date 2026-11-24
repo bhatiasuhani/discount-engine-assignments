@@ -10,6 +10,8 @@ import CsvUploader from './components/CsvUploader.jsx'
 import DataTable from './components/DataTable.jsx'
 import ErrorBanner from './components/ErrorBanner.jsx'
 import NlRuleInput from './components/NlRuleInput.jsx'
+import { extractTextItems } from './inputs/pdfTextExtractor.js'
+import { cartItemsFromTextItems } from './inputs/pdfCartInput.js'
 import { parseRulesCSV, parseCartCSV } from './engine/csvParser.js'
 import { processCart, applyCartOffer } from './engine/discountEngine.js'
 
@@ -116,6 +118,8 @@ export default function App() {
 
   const [cartItems, setCartItems]   = useState([])
   const [cartErrors, setCartErrors] = useState([])
+  const [cartWarnings, setCartWarnings] = useState([])
+  const [pdfLoading, setPdfLoading]     = useState(false)
   const [cartFileName, setCartFileName]   = useState('')
 
   const [results, setResults]       = useState(null)
@@ -135,8 +139,35 @@ export default function App() {
     const { data, errors } = parseCartCSV(csvText)
     setCartItems(data)
     setCartErrors(errors)
+    setCartWarnings([])
     setCartFileName(fileName)
     setResults(null)
+  }
+
+  // PDF cart: replace the cart and re-run automatically with the current rules.
+  async function handleCartPdfLoad(buffer, fileName) {
+    setPdfLoading(true)
+    setCartWarnings([])
+    try {
+      const textItems = await extractTextItems(buffer)
+      const { items, warnings, error } = cartItemsFromTextItems(textItems)
+      if (error) {
+        // Keep the existing cart rather than wiping it with nothing.
+        setCartErrors([`${fileName}: ${error}`, ...warnings])
+        return
+      }
+      setCartItems(items)
+      setCartErrors([])
+      setCartWarnings(warnings)
+      setCartFileName(fileName)
+      if (rules.length > 0) runEngine(items, rules)
+      else setResults(null)
+    } catch (err) {
+      console.error(err)
+      setCartErrors([`${fileName}: could not read this file as a PDF.`])
+    } finally {
+      setPdfLoading(false)
+    }
   }
 
   // Runs the engine. Every input path (CSV, natural language, ...) ends up here.
@@ -201,10 +232,28 @@ export default function App() {
               label="cart.csv"
               description="Upload your cart CSV"
               onLoad={handleCartLoad}
-              hasData={cartItems.length > 0}
+              hasData={cartItems.length > 0 && !cartFileName.toLowerCase().endsWith('.pdf')}
+              fileName={cartFileName}
+            />
+            <div style={{ textAlign: 'center', fontSize: 11, color: '#888', margin: '0.5rem 0' }}>or</div>
+            <CsvUploader
+              label="cart.pdf"
+              description={pdfLoading ? 'Reading PDF…' : 'Upload an order PDF (Product, Brand, Platform, Base Price)'}
+              accept=".pdf,application/pdf"
+              readAs="arrayBuffer"
+              onLoad={handleCartPdfLoad}
+              hasData={cartItems.length > 0 && cartFileName.toLowerCase().endsWith('.pdf')}
               fileName={cartFileName}
             />
             <ErrorBanner errors={cartErrors} />
+            {cartWarnings.length > 0 && (
+              <div style={{ background: '#fff7e6', border: '1px solid #f0c36d', borderLeft: '3px solid #e0a100', borderRadius: 4, padding: '0.6rem 0.9rem', marginTop: '0.5rem' }}>
+                <div style={{ fontWeight: 700, fontSize: 12, color: '#8a5a00', marginBottom: 4 }}>
+                  {cartWarnings.length} row{cartWarnings.length > 1 ? 's' : ''} skipped from the PDF
+                </div>
+                {cartWarnings.map((w) => <div key={w} style={{ fontSize: 12, color: '#5a3d00', marginTop: 2 }}>{w}</div>)}
+              </div>
+            )}
             {cartItems.length > 0 && (
               <div style={{ marginTop: '0.75rem' }}>
                 <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>

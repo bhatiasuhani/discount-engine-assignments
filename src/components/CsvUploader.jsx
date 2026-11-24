@@ -1,13 +1,14 @@
 /**
  * CsvUploader.jsx
  *
- * Renders a file upload area for a single CSV file.
- * Calls onLoad(rawText) when a file is selected.
+ * Renders a file upload area for a single file.
+ * Calls onLoad(content, fileName) when a file is selected.
+ * readAs="text" (default, CSV) or "arrayBuffer" (binary files like PDF).
  */
 
 import { useRef } from 'react'
 
-export default function CsvUploader({ label, description, onLoad, hasData, fileName }) {
+export default function CsvUploader({ label, description, onLoad, hasData, fileName, accept = '.csv', readAs = 'text' }) {
   const inputRef = useRef(null)
 
   function handleFile(e) {
@@ -15,7 +16,8 @@ export default function CsvUploader({ label, description, onLoad, hasData, fileN
     if (!file) return
     const reader = new FileReader()
     reader.onload = (evt) => onLoad(evt.target.result, file.name)
-    reader.readAsText(file)
+    if (readAs === 'arrayBuffer') reader.readAsArrayBuffer(file)
+    else reader.readAsText(file)
     // Reset input so the same file can be re-uploaded
     e.target.value = ''
   }
@@ -35,7 +37,7 @@ export default function CsvUploader({ label, description, onLoad, hasData, fileN
       <input
         ref={inputRef}
         type="file"
-        accept=".csv"
+        accept={accept}
         style={{ display: 'none' }}
         onChange={handleFile}
       />

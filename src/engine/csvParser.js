@@ -14,6 +14,7 @@
 
 import Papa from 'papaparse'
 import { validateRule } from './ruleValidator.js'
+import { validateCartItem } from './cartValidator.js'
 
 /**
  * Parses the raw text of rules.csv into an array of DiscountRule objects.
@@ -69,33 +70,15 @@ export function parseCartCSV(csvText) {
   const errors = []
 
   rows.forEach((row, i) => {
-    const rowNum = i + 2
-    const missing = []
-
-    if (!row.item_id) missing.push('item_id')
-    if (!row.product) missing.push('product')
-    if (!row.brand) missing.push('brand')
-    if (!row.platform) missing.push('platform')
-    if (row.base_price === undefined || row.base_price === '') missing.push('base_price')
-
-    if (missing.length > 0) {
-      errors.push(`Row ${rowNum}: missing fields — ${missing.join(', ')}`)
-      return
-    }
-
-    const basePrice = parseFloat(row.base_price)
-    if (isNaN(basePrice) || basePrice <= 0) {
-      errors.push(`Row ${rowNum}: base_price must be a positive number, got "${row.base_price}"`)
-      return
-    }
-
-    data.push({
-      itemId: row.item_id.trim(),
-      product: row.product.trim(),
-      brand: row.brand.trim(),
-      platform: row.platform.trim(),
-      basePrice: Math.round(basePrice),
+    const { item, errors: rowErrors } = validateCartItem({
+      itemId: row.item_id,
+      product: row.product,
+      brand: row.brand,
+      platform: row.platform,
+      basePrice: row.base_price,
     })
+    if (item) data.push(item)
+    else errors.push(`Row ${i + 2}: ${rowErrors.join('; ')}`)
   })
 
   return { data, errors }
