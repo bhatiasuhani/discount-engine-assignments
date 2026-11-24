@@ -3,7 +3,7 @@
 A customer-facing cart pricing engine. It picks the offer that saves the customer the most, stacks stackable offers, applies cart-level offers, and explains every price in plain language.
  
 **Live app:** https://discount-engine-assignments.vercel.app
-**Walkthrough (Loom):** _add link here_
+**Walkthrough (Loom):** https://www.loom.com/share/33090facbb9a460ead2781a290b6140d
  
 ## Run locally
  
