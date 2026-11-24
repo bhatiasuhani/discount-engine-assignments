@@ -10,7 +10,7 @@ import CsvUploader from './components/CsvUploader.jsx'
 import DataTable from './components/DataTable.jsx'
 import ErrorBanner from './components/ErrorBanner.jsx'
 import { parseRulesCSV, parseCartCSV } from './engine/csvParser.js'
-import { processCart, cartTotal } from './engine/discountEngine.js'
+import { processCart, applyCartOffer } from './engine/discountEngine.js'
 
 // ── Column definitions ───────────────────────────────────────────
 
@@ -25,6 +25,7 @@ const RULES_COLUMNS = [
     render: (v, row) => row.type === 'percentage' ? `${v}% off` : `Rs.${v} off`,
   },
   { key: 'stackable', label: 'Stackable',  render: (v) => (v ? 'Yes' : 'No') },
+  { key: 'minCartValue', label: 'Condition', render: (v) => (v != null ? `Cart ≥ Rs.${v.toLocaleString('en-IN')}` : '—') },
 ]
 
 const CART_COLUMNS = [
@@ -114,6 +115,7 @@ export default function App() {
   const [cartFileName, setCartFileName]   = useState('')
 
   const [results, setResults]       = useState(null)
+  const [summary, setSummary]       = useState(null)
 
   // ── Handlers ──
 
@@ -136,6 +138,7 @@ export default function App() {
   function handleCalculate() {
     const res = processCart(cartItems, rules)
     setResults(res)
+    setSummary(applyCartOffer(res, rules))
   }
 
   const canCalculate = rules.length > 0 && cartItems.length > 0
@@ -214,14 +217,31 @@ export default function App() {
         </div>
 
         {/* Results */}
-        {results && (
+        {results && summary && (
           <div style={S.section}>
             <div style={S.sectionTitle}>Cart Summary</div>
             <DataTable columns={RESULTS_COLUMNS} rows={results} />
             <div style={S.totalRow}>
-              <span style={S.totalLabel}>Cart Total</span>
-              <span style={S.totalValue}>Rs.{cartTotal(results).toLocaleString('en-IN')}</span>
+              <span style={S.totalLabel}>Subtotal</span>
+              <span style={S.totalValue}>Rs.{summary.subtotal.toLocaleString('en-IN')}</span>
             </div>
+            {summary.cartOffer && (
+              <div style={{ ...S.totalRow, borderTop: 'none', marginTop: 0, color: '#1e5c2c' }}>
+                <span style={{ fontWeight: 600 }}>
+                  {summary.cartOffer.label} — Rs.{summary.cartOffer.saving.toLocaleString('en-IN')} saved
+                </span>
+                <span style={{ fontWeight: 700 }}>−Rs.{summary.cartOffer.saving.toLocaleString('en-IN')}</span>
+              </div>
+            )}
+            <div style={S.totalRow}>
+              <span style={S.totalLabel}>Final Cart Total</span>
+              <span style={S.totalValue}>Rs.{summary.finalTotal.toLocaleString('en-IN')}</span>
+            </div>
+            {summary.unlockHint && (
+              <div style={{ textAlign: 'right', fontSize: 12, color: '#FF5800', marginTop: 6 }}>
+                {summary.unlockHint}
+              </div>
+            )}
           </div>
         )}
 

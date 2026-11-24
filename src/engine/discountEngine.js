@@ -172,3 +172,41 @@ export function processCart(cartItems, rules) {
 export function cartTotal(results) {
   return results.reduce((sum, r) => sum + r.finalPrice, 0)
 }
+
+/**
+ * Cart-level offer. Runs AFTER item-level discounts.
+ * Checks each cart rule's threshold against the sum of final item prices
+ * and applies the eligible rule that saves the customer the most.
+ *
+ * Returns { subtotal, cartOffer, finalTotal, unlockHint }
+ */
+export function applyCartOffer(results, rules) {
+  const subtotal = cartTotal(results)
+  const cartRules = rules.filter((r) => r.scope === 'cart')
+
+  const eligible = cartRules
+    .filter((r) => subtotal >= r.minCartValue)
+    .map((r) => ({ rule: r, saving: Math.min(calculateDiscountAmount(subtotal, r), subtotal) }))
+    .sort((a, b) => b.saving - a.saving)
+
+  const best = eligible[0] || null
+
+  // Nearest threshold the cart has NOT reached — used for a helpful nudge
+  const nearest = cartRules
+    .filter((r) => subtotal < r.minCartValue)
+    .sort((a, b) => a.minCartValue - b.minCartValue)[0]
+
+  const offerText = (r) => (r.type === 'percentage' ? `${r.value}% off` : `Rs.${r.value} off`)
+
+  return {
+    subtotal,
+    cartOffer: best
+      ? { ruleId: best.rule.ruleId, label: `Cart offer: ${offerText(best.rule)}`, saving: best.saving }
+      : null,
+    finalTotal: subtotal - (best ? best.saving : 0),
+    unlockHint:
+      !best && nearest
+        ? `Add Rs.${(nearest.minCartValue - subtotal).toLocaleString('en-IN')} more to unlock ${offerText(nearest)} your cart`
+        : null,
+  }
+}

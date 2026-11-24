@@ -13,6 +13,7 @@
  */
 
 import Papa from 'papaparse'
+import { validateRule } from './ruleValidator.js'
 
 /**
  * Parses the raw text of rules.csv into an array of DiscountRule objects.
@@ -33,50 +34,17 @@ export function parseRulesCSV(csvText) {
   const errors = []
 
   rows.forEach((row, i) => {
-    const rowNum = i + 2 // account for header row
-    const missing = []
-
-    if (!row.rule_id) missing.push('rule_id')
-    if (!row.scope) missing.push('scope')
-    if (!row.applies_to) missing.push('applies_to')
-    if (!row.type) missing.push('type')
-    if (row.value === undefined || row.value === '') missing.push('value')
-    if (row.stackable === undefined || row.stackable === '') missing.push('stackable')
-
-    if (missing.length > 0) {
-      errors.push(`Row ${rowNum}: missing fields — ${missing.join(', ')}`)
-      return
-    }
-
-    const scope = row.scope.trim().toLowerCase()
-    if (scope !== 'brand' && scope !== 'platform') {
-      errors.push(`Row ${rowNum}: scope must be "brand" or "platform", got "${row.scope}"`)
-      return
-    }
-
-    const type = row.type.trim().toLowerCase()
-    if (type !== 'percentage' && type !== 'flat') {
-      errors.push(`Row ${rowNum}: type must be "percentage" or "flat", got "${row.type}"`)
-      return
-    }
-
-    const value = parseFloat(row.value)
-    if (isNaN(value) || value <= 0) {
-      errors.push(`Row ${rowNum}: value must be a positive number, got "${row.value}"`)
-      return
-    }
-
-    const stackableStr = row.stackable.trim().toLowerCase()
-    const stackable = stackableStr === 'true' || stackableStr === '1' || stackableStr === 'yes'
-
-    data.push({
-      ruleId: row.rule_id.trim(),
-      scope,
-      appliesTo: row.applies_to.trim(),
-      type,
-      value,
-      stackable,
+    const { rule, errors: rowErrors } = validateRule({
+      ruleId: row.rule_id,
+      scope: row.scope,
+      appliesTo: row.applies_to,
+      type: row.type,
+      value: row.value,
+      stackable: row.stackable,
+      minCartValue: row.min_cart_value,
     })
+    if (rule) data.push(rule)
+    else errors.push(`Row ${i + 2}: ${rowErrors.join('; ')}`)
   })
 
   return { data, errors }
