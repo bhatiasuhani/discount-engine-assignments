@@ -8,7 +8,14 @@
  * every result through the same validateRule() used by the CSV input.
  */
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash'
+// Tried in order. If one is overloaded (503) or rate-limited (429), the next is used.
+// Override with GEMINI_MODEL="model-a,model-b" in env vars.
+const MODELS = (process.env.GEMINI_MODEL || 'gemini-3.5-flash,gemini-4-hydrogen')
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean)
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 function buildPrompt(text, known) {
   return `You convert a shop admin's plain-English discount description into JSON.
@@ -36,6 +43,56 @@ Known platforms: ${known.platforms.join(', ') || 'none'}
 Description: """${text}"""`
 }
 
+/** One HTTP call to Gemini. Returns { ok, status, data?, detail? } and never throws. */
+async function requestOnce(apiKey, model, prompt, lowThinking) {
+  const generationConfig = { responseMimeType: 'application/json' }
+  // Parsing one sentence into JSON doesn't need deep reasoning; low thinking = much faster.
+  if (lowThinking) generationConfig.thinkingConfig = { thinkingLevel: 'low' }
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig }),
+        signal: AbortSignal.timeout(25000),
+      }
+    )
+    if (response.ok) return { ok: true, status: 200, data: await response.json() }
+    return { ok: false, status: response.status, detail: await response.text() }
+  } catch (err) {
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+    return { ok: false, status: timedOut ? 504 : 0, detail: String(err) }
+  }
+}
+
+/** Calls Gemini with retries + model fallback. Returns { ok, status, data }. */
+async function callGemini(apiKey, prompt) {
+  let last = { ok: false, status: 0 }
+  for (const model of MODELS) {
+    let lowThinking = true
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      let result = await requestOnce(apiKey, model, prompt, lowThinking)
+
+      // Some models don't accept the thinking setting: retry once without it.
+      if (!result.ok && result.status === 400 && lowThinking && /thinking/i.test(result.detail || '')) {
+        lowThinking = false
+        result = await requestOnce(apiKey, model, prompt, false)
+      }
+      if (result.ok) return result
+
+      console.error(`Gemini ${model} attempt ${attempt} failed:`, result.status, (result.detail || '').slice(0, 300))
+      last = result
+
+      if (result.status === 404) break // model not available -> next model
+      if (![0, 429, 500, 503, 504].includes(result.status)) return last // bad key / bad request -> stop
+      if (result.status === 504) break // timed out -> don't wait again on the same model
+      await sleep(800 * attempt)
+    }
+  }
+  return last
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Use POST' })
@@ -60,26 +117,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: buildPrompt(text.trim(), safeKnown) }] }],
-          generationConfig: { responseMimeType: 'application/json' },
-        }),
-      }
-    )
+    const result = await callGemini(apiKey, buildPrompt(text.trim(), safeKnown))
 
-    if (!response.ok) {
-      const detail = await response.text()
-      console.error('Gemini error', response.status, detail)
-      return res.status(502).json({ error: `The AI service returned an error (${response.status}). Please try again.` })
+    if (!result.ok) {
+      const msg =
+        result.status === 400 || result.status === 403
+          ? 'The AI service rejected the request (check the API key).'
+          : result.status === 429 || result.status === 503
+          ? 'The AI service is busy right now. Please try again in a few seconds.'
+          : result.status === 504
+          ? 'The AI took too long to respond. Please try again.'
+          : `The AI service returned an error (${result.status}). Please try again.`
+      return res.status(502).json({ error: msg })
     }
 
-    const data = await response.json()
-    const raw = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || ''
+    const raw = result.data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || ''
     const cleaned = raw.replace(/```json|```/g, '').trim()
 
     let parsed
@@ -92,6 +144,9 @@ export default async function handler(req, res) {
     return res.status(200).json(parsed)
   } catch (err) {
     console.error(err)
-    return res.status(502).json({ error: 'Could not reach the AI service. Please try again.' })
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+    return res.status(504).json({
+      error: timedOut ? 'The AI took too long to respond. Please try again.' : 'Could not reach the AI service. Please try again.',
+    })
   }
 }
